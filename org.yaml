@@ -1,0 +1,130 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Orgonisation data collections.
+Parameters:
+  Tags:
+    Type: String
+    Description: List of tags from your Organisation you would like to include separated by a comma.
+  DestinationBucket:
+    Type: String
+    Description: Name of the S3 Bucket that exists or needs to be created to hold rightsizing information
+    AllowedPattern: (?=^.{3,63}$)(?!^(\d+\.)+\d+$)(^(([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])\.)*([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])$)
+  GlueCrawlerRole:
+    Type: String
+    Description: ARN of the IAM role glue crawler
+  LambdaRoleARN:
+    Type: String
+    Description: ARN of role created for connection to managemnet account
+  RoleName:
+    Type: String
+    Description: ARN of the IAM role deployed in the management accounts which can retrieve AWS Cost Explorer rightsizing information.
+Outputs:
+  LambdaFunctionName:
+    Value:
+      Ref: LambdaOrgData
+  LambdaFunctionARN:
+    Description: Lambda function ARN.
+    Value:
+      Fn::GetAtt:
+        - LambdaOrgData
+        - Arn
+Resources:
+  LambdaOrgData:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: organization-lambda-function
+      Description: LambdaFunctioni of python3.8.
+      Runtime: python3.8
+      Code:
+          ZipFile: |
+            #!/usr/bin/env python3
+    
+            #Lambda Function Code - Lambda_Org_Data
+            import boto3
+            from botocore.exceptions import ClientError
+            from botocore.client import Config
+            import os
+            import json
+            import datetime
+
+            def myconverter(o):
+              if isinstance(o, datetime.datetime):
+                return o.__str__()
+
+            def list_accounts():
+              bucket = os.environ["BUCKET_NAME"] #Using enviroment varibles below the lambda will use your S3 bucket
+              tags_check = os.environ["TAGS"]
+              ROLE_ARN = os.environ['ROLE_ARN']
+
+              sts_connection = boto3.client('sts')
+              acct_b = sts_connection.assume_role(
+                    RoleArn=ROLE_ARN,
+                    RoleSessionName="cross_acct_lambda"
+              )
+                        
+              ACCESS_KEY = acct_b['Credentials']['AccessKeyId']
+              SECRET_KEY = acct_b['Credentials']['SecretAccessKey']
+              SESSION_TOKEN = acct_b['Credentials']['SessionToken']
+
+              # create service client using the assumed role credentials
+              client = boto3.client(
+                    "organizations", region_name="us-east-1", #Using the Organization client to get the data. This MUST be us-east-1 regardless of region you have the lamda in
+                    aws_access_key_id=ACCESS_KEY,
+                    aws_secret_access_key=SECRET_KEY,
+                    aws_session_token=SESSION_TOKEN,
+              )
+              paginator = client.get_paginator("list_accounts") #Paginator for a large list of accounts
+              response_iterator = paginator.paginate()
+              with open('/tmp/org.json', 'w') as f: # Saving in the temporay folder in the lambda
+
+                    for response in response_iterator: # extracts the needed info
+                        for account in response["Accounts"]:
+                          aid = account["Id"]                
+                          if tags_check != '':
+                                tags_list = client.list_tags_for_resource(ResourceId=aid) #gets the lists of tags for this account
+                                    
+                                for tag in os.environ.get("TAGS").split(","): #looking at tags in the enviroment variables split by a space
+                                    for org_tag in tags_list['Tags']:
+                                      if tag == org_tag['Key']: #if the tag found on the account is the same as the current one in the environent varibles, add it to the data
+                                            value = org_tag['Value']
+                                            kv = {tag : value}
+                                            account.update(kv)
+                                      
+                          data = json.dumps(account, default = myconverter) #converts datetime to be able to placed in json
+
+                          f.write(data)
+                          f.write('\n')
+              print("respose gathered")
+
+              try:
+                    s3 = boto3.client('s3', config=Config(s3={'addressing_style': 'path'}))
+                    s3.upload_file(
+                        '/tmp/org.json', bucket, "organisation-data/org.json") #uploading the file with the data to s3
+                    print("org data in s3")
+              except Exception as e:
+                    print(e)
+
+            def lambda_handler(event, context):
+              list_accounts()
+
+      Handler: 'index.lambda_handler'
+      MemorySize: 2688
+      Timeout: 300
+      Role: 
+        !Ref LambdaRoleARN
+      Environment:
+        Variables:
+          TAGS:
+            Fn::Sub: ${Tags}
+          BUCKET_NAME: !Ref DestinationBucket
+          ROLE_ARN:
+            Ref: RoleName
+  OrgCrawler:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: OrgGlueCrawler
+      Role: !Ref GlueCrawlerRole
+      DatabaseName: Rightsizing
+      Targets:
+        S3Targets:
+          - Path: !Sub "s3://${DestinationBucket}/organisation-data/"
+ 

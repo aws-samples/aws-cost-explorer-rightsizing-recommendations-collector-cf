@@ -1,0 +1,107 @@
+---
+#Replace  <CodeBucket> with your code bucket param name
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Main CF template that builds shared resources and other stacks
+Parameters:
+  CrawlerName:
+    Type: String
+    Default: crawl-rightsizing-recommendations
+    Description: Name of the AWS crawler to be created
+    AllowedPattern: ^.*[^0-9]$
+    ConstraintDescription: Must end with non-numeric character.
+  DestinationBucket:
+    Type: String
+    Description: Name of the S3 Bucket that exists or needs to be created to hold rightsizing information
+    AllowedPattern: (?=^.{3,63}$)(?!^(\d+\.)+\d+$)(^(([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])\.)*([a-z0-9]|[a-z0-9][a-z0-9\-]*[a-z0-9])$)
+  DestinationPrefix:
+    Type: String
+    Description: Name of the folder/prefix for rightsizing information to be stored in
+    Default: rightsizing
+  RoleARN:
+    Type: String
+    Description: ARN of the IAM role deployed in the management accounts which can retrieve AWS Cost Explorer rightsizing information.
+  Tags:
+    Type: String
+    Description: List of tags from your Organisation you would like to include separated by a comma.
+  CodeBucket:
+    Type: String
+    Description:  Name of the S3 Bucket that exists and holds the code for the athena emailer function
+  Region:
+    Type: String
+    Description: Region of your Code Bucket, the format needs to be eu-west-1 etc
+Resources:
+  S3Bucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName:
+        Ref: DestinationBucket
+  RightsizeStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        CrawlerName: !Ref CrawlerName
+        DestinationBucket: !Ref DestinationBucket
+        DestinationBucketARN: !GetAtt S3Bucket.Arn 
+        DestinationPrefix: !Ref DestinationPrefix
+        RoleName: !Ref RoleARN
+      TemplateURL: !Sub "https://s3-${Region}.amazonaws.com/${CodeBucket}/cloudformation/organization_rightsizing_lambda.yaml"
+      TimeoutInMinutes: 5
+  OrgStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://s3-${Region}.amazonaws.com/${CodeBucket}/cloudformation/org.yaml"
+      TimeoutInMinutes: 2
+      Parameters:
+        RoleName: !Ref RoleARN
+        GlueCrawlerRole: !GetAtt 'RightsizeStack.Outputs.GlueCrawlerRoleARN'
+        LambdaRoleARN: !GetAtt 'RightsizeStack.Outputs.CostExplorerRightsizingLambdaRoleARN'
+        DestinationBucket: !Ref DestinationBucket
+        Tags: !Ref Tags
+  CloudWatchTrigger:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Weekly Notificaton Event for Rightsizing Recommendations
+      Name: Rightsizing-Recommendations-Weekly-Scheduler
+      ScheduleExpression: "rate(7 days)"
+      State: ENABLED
+      Targets:
+        - Arn:
+            !GetAtt 'RightsizeStack.Outputs.LambdaCostExplorerRightsizingARN'
+          Id: WeeklyTriggerForEBSUtilization
+        - Arn:
+            !GetAtt 'OrgStack.Outputs.LambdaFunctionARN'
+          Id: WeeklyTriggerForOrgdata
+  OrgEventPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt 'OrgStack.Outputs.LambdaFunctionARN'
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceAccount: !Ref 'AWS::AccountId'
+      SourceArn: !GetAtt CloudWatchTrigger.Arn
+  RightEventPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt 'RightsizeStack.Outputs.LambdaCostExplorerRightsizingARN'
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceAccount: !Ref 'AWS::AccountId'
+      SourceArn: !GetAtt CloudWatchTrigger.Arn
+  
+Outputs:
+  CostExplorerRightsizingLambdaRoleARN:
+    Value: !GetAtt 'RightsizeStack.Outputs.CostExplorerRightsizingLambdaRoleARN'
+  LambdaCostExplorerRightsizingARN:
+    Value: !GetAtt 'RightsizeStack.Outputs.LambdaCostExplorerRightsizingARN'
+  S3Bucket:
+    Description: Name of S3 Bucket which will store the AWS Cost Explorer Rightsizing recommendations
+    Value:
+      Ref: S3Bucket
+  S3BucketARN:
+    Description: ARN of S3 Bucket which will store the AWS Cost Explorer Rightsizing recommendations
+    Value:
+       Fn::GetAtt:
+        - S3Bucket
+        - Arn 
+ 
+

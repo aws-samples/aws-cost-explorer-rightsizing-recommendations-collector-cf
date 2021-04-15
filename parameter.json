@@ -1,0 +1,22 @@
+[
+    {
+      "ParameterKey": "Region",
+      "ParameterValue": ""
+    }, 
+    {
+      "ParameterKey": "DestinationBucket",
+      "ParameterValue": ""
+    }, 
+    {
+      "ParameterKey": "RoleARN",
+      "ParameterValue": ""
+    }, 
+    {
+      "ParameterKey": "Tags",
+      "ParameterValue": ""
+    }, 
+    {
+      "ParameterKey": "CodeBucket",
+      "ParameterValue": ""
+    }
+  ]
