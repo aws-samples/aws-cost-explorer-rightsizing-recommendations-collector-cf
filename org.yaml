@@ -37,7 +37,7 @@ Resources:
       Code:
           ZipFile: |
             #!/usr/bin/env python3
-    
+            #Author: Stephanie Gooch 2021
             #Lambda Function Code - Lambda_Org_Data
             import boto3
             from botocore.exceptions import ClientError
