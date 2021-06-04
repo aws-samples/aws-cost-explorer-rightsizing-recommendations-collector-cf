@@ -37,6 +37,10 @@ Resources:
         Ref: DestinationBucket
       VersioningConfiguration:
         Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
   RightsizeStack:
     Type: AWS::CloudFormation::Stack
     Properties:
