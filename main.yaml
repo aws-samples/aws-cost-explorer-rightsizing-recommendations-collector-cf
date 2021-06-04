@@ -22,7 +22,7 @@ Parameters:
     Description: ARN of the IAM role deployed in the management accounts which can retrieve AWS Cost Explorer rightsizing information.
   Tags:
     Type: String
-    Description: List of tags from your Organisation you would like to include separated by a comma.
+    Description: List of tags from your Organization you would like to include separated by a comma.
   CodeBucket:
     Type: String
     Description:  Name of the S3 Bucket that exists and holds the code for the athena emailer function
@@ -35,6 +35,8 @@ Resources:
     Properties:
       BucketName:
         Ref: DestinationBucket
+      VersioningConfiguration:
+        Status: Enabled
   RightsizeStack:
     Type: AWS::CloudFormation::Stack
     Properties:
